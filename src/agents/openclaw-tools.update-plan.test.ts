@@ -123,6 +123,48 @@ describe("openclaw-tools update_plan gating", () => {
     expect(toolNames(denied)).not.toContain("message");
   });
 
+  it("only materializes runtime-allowed core tool factories", () => {
+    const messageOnly = createOpenClawTools({
+      config: {} as OpenClawConfig,
+      disablePluginTools: true,
+      pluginToolAllowlist: ["message"],
+      coreToolAllowlist: ["message"],
+      wrapBeforeToolCallHook: false,
+    });
+    const heartbeatAlias = createOpenClawTools({
+      config: {} as OpenClawConfig,
+      disablePluginTools: true,
+      enableHeartbeatTool: true,
+      pluginToolAllowlist: ["heartbeat_response"],
+      coreToolAllowlist: ["heartbeat_response"],
+      wrapBeforeToolCallHook: false,
+    });
+
+    expect(toolNames(messageOnly)).toStrictEqual(["message"]);
+    expect(toolNames(heartbeatAlias)).toStrictEqual(["heartbeat_respond"]);
+  });
+
+  it("only materializes core-allowed optional media factories", () => {
+    const tools = createOpenClawTools({
+      config: {
+        agents: {
+          defaults: {
+            imageGenerationModel: { primary: "image-owner/model" },
+            videoGenerationModel: { primary: "video-owner/model" },
+            musicGenerationModel: { primary: "music-owner/model" },
+            pdfModel: { primary: "media-owner/model" },
+          },
+        },
+      } as OpenClawConfig,
+      agentDir: "agent",
+      disablePluginTools: true,
+      coreToolAllowlist: ["image_generate"],
+      wrapBeforeToolCallHook: false,
+    });
+
+    expect(toolNames(tools)).toStrictEqual(["image_generate"]);
+  });
+
   it("keeps subagent spawn available for trusted embedded gateway-bound runs", () => {
     setEmbeddedMode(true);
     const defaultTools = createOpenClawTools({

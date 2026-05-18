@@ -107,6 +107,21 @@ function isOpenAIProvider(provider?: string) {
 
 const MEMORY_FLUSH_ALLOWED_TOOL_NAMES = new Set(["read", "write"]);
 
+function mergeCoreToolAllowlistWithForcedTools(
+  allowlist: string[] | undefined,
+  forcedTools: readonly string[],
+): string[] | undefined {
+  if (forcedTools.length === 0 || allowlist === undefined) {
+    return allowlist;
+  }
+  if (allowlist.some((entry) => normalizeToolName(entry) === "*")) {
+    return allowlist;
+  }
+  const normalized = new Set(allowlist.map((entry) => normalizeToolName(entry)));
+  const missingForcedTools = forcedTools.filter((toolName) => !normalized.has(toolName));
+  return missingForcedTools.length === 0 ? allowlist : [...allowlist, ...missingForcedTools];
+}
+
 type GuardContainerMount = {
   containerRoot: string;
   hostRoot: string;
@@ -426,6 +441,8 @@ export function createOpenClawCodingTools(options?: {
   allowGatewaySubagentBinding?: boolean;
   /** Runtime-scoped explicit allowlist used to materialize matching plugin tools. */
   runtimeToolAllowlist?: string[];
+  /** Runtime-scoped allowlist used to avoid materializing discarded core tool factories. */
+  coreToolAllowlist?: string[];
   /** If true, the model has native vision capability */
   modelHasVision?: boolean;
   /** Require explicit message targets (no implicit last-route sends). */
@@ -562,6 +579,12 @@ export function createOpenClawCodingTools(options?: {
     ...(forceHeartbeatTool ? [HEARTBEAT_RESPONSE_TOOL_NAME] : []),
     ...toolSearchControlAllowlist,
   ];
+  const coreToolFactoryAllowlist = mergeCoreToolAllowlistWithForcedTools(
+    options?.coreToolAllowlist ?? options?.runtimeToolAllowlist,
+    runtimeProfileAlsoAllow.filter(
+      (toolName) => toolName === "message" || toolName === HEARTBEAT_RESPONSE_TOOL_NAME,
+    ),
+  );
   const profilePolicyWithAlsoAllow = mergeAlsoAllowPolicy(profilePolicy, [
     ...(profileAlsoAllow ?? []),
     ...runtimeProfileAlsoAllow,
@@ -938,6 +961,7 @@ export function createOpenClawCodingTools(options?: {
           config: options?.config,
           pluginToolAllowlist,
           pluginToolDenylist,
+          coreToolAllowlist: coreToolFactoryAllowlist,
           currentChannelId: options?.currentChannelId,
           currentThreadTs: options?.currentThreadTs,
           currentMessageId: options?.currentMessageId,

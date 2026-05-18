@@ -180,18 +180,19 @@ import { resolveSystemPromptOverride } from "../../system-prompt-override.js";
 import { buildSystemPromptParams } from "../../system-prompt-params.js";
 import { buildSystemPromptReport } from "../../system-prompt-report.js";
 import { appendModelIdentitySystemPrompt } from "../../system-prompt.js";
+import type { PromptMode } from "../../system-prompt.types.js";
 import { resolveAgentTimeoutMs } from "../../timeout.js";
 import {
   buildEmptyExplicitToolAllowlistError,
   collectExplicitToolAllowlistSources,
 } from "../../tool-allowlist-guard.js";
 import { UNKNOWN_TOOL_THRESHOLD } from "../../tool-loop-detection.js";
+import { isToolAllowedByPolicyName } from "../../tool-policy-match.js";
 import {
   mergeAlsoAllowPolicy,
   normalizeToolName,
   resolveToolProfilePolicy,
 } from "../../tool-policy.js";
-import { isToolAllowedByPolicyName } from "../../tool-policy-match.js";
 import {
   addClientToolsToToolSearchCatalog,
   applyToolSearchCatalog,
@@ -252,7 +253,6 @@ import { buildEmbeddedSandboxInfo } from "../sandbox-info.js";
 import { prewarmSessionFile, trackSessionManagerAccess } from "../session-manager-cache.js";
 import { prepareSessionManagerForRun } from "../session-manager-init.js";
 import { resolveEmbeddedRunSkillEntries } from "../skills-runtime.js";
-import type { PromptMode } from "../../system-prompt.types.js";
 import {
   describeEmbeddedAgentStreamStrategy,
   resetEmbeddedAgentBaseStreamFnCacheForTest,
@@ -1505,12 +1505,7 @@ export async function runEmbeddedAttempt(
       toolSearchControlsEnabledForRun &&
       toolSearchBaseToolsAllow !== undefined &&
       toolSearchBaseToolsAllow.length > 0
-        ? [
-            ...new Set([
-              ...toolSearchBaseToolsAllow,
-              ...TOOL_SEARCH_CONTROL_ALLOWLIST_NAMES,
-            ]),
-          ]
+        ? [...new Set([...toolSearchBaseToolsAllow, ...TOOL_SEARCH_CONTROL_ALLOWLIST_NAMES])]
         : toolSearchBaseToolsAllow;
     const shouldConstructTools =
       toolConstructionPlan.constructTools ||
@@ -1590,6 +1585,7 @@ export async function runEmbeddedAttempt(
               return toolSearchCatalogExecutor(toolParams);
             },
             toolConstructionPlan: toolConstructionPlan.codingToolConstructionPlan,
+            coreToolAllowlist: constructionToolsAllow,
             replyToMode: params.replyToMode,
             hasRepliedRef: params.hasRepliedRef,
             modelHasVision: params.model.input?.includes("image") ?? false,

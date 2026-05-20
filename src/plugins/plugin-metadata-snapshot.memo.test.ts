@@ -275,7 +275,7 @@ describe("loadPluginMetadataSnapshot process memo", () => {
     expect(loadPluginRegistrySnapshotWithMetadata).toHaveBeenCalledOnce();
   });
 
-  it("refreshes policy-stale derived snapshots when derived plugin files change", () => {
+  it("refreshes derived snapshots when the install index is rewritten", () => {
     const stateDir = tempStateDir();
     touchPersistedIndex(stateDir);
     const pluginDir = path.join(stateDir, "current", "derived");
@@ -295,11 +295,36 @@ describe("loadPluginMetadataSnapshot process memo", () => {
     loadPluginManifestRegistryForInstalledIndex.mockReturnValue(makeManifestRegistry("derived"));
 
     loadPluginMetadataSnapshot({ config: {}, env: {}, stateDir });
+    touchPersistedIndex(stateDir, 2);
+    loadPluginMetadataSnapshot({ config: {}, env: {}, stateDir });
+
+    expect(loadPluginRegistrySnapshotWithMetadata).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes derived snapshots when a derived-only plugin manifest changes", () => {
+    const stateDir = tempStateDir();
+    touchPersistedIndex(stateDir);
+    const pluginDir = path.join(stateDir, "current", "derived");
+    const manifestPath = path.join(pluginDir, "openclaw.plugin.json");
+    writeJson(manifestPath, { id: "derived", version: "1.0.0" });
+    loadPluginRegistrySnapshotWithMetadata.mockReturnValue({
+      source: "derived",
+      snapshot: makeIndex("derived", { manifestPath, rootDir: pluginDir }),
+      diagnostics: [
+        {
+          level: "warn",
+          code: "persisted-registry-stale-source",
+          message: "stale source",
+        },
+      ],
+    });
+    loadPluginManifestRegistryForInstalledIndex.mockReturnValue(makeManifestRegistry("derived"));
+
+    loadPluginMetadataSnapshot({ config: {}, env: {}, stateDir });
     writeJson(manifestPath, { id: "derived", version: "2.0.0", commandAliases: [{ name: "new" }] });
     loadPluginMetadataSnapshot({ config: {}, env: {}, stateDir });
 
     expect(loadPluginRegistrySnapshotWithMetadata).toHaveBeenCalledTimes(2);
-    expect(loadPluginManifestRegistryForInstalledIndex).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -307,7 +332,7 @@ describe("loadPluginMetadataSnapshot process memo", () => {
     ["persisted-registry-stale-source", undefined],
     ["persisted-registry-disabled", undefined],
     [undefined, { preferPersisted: false }],
-  ])("does not memoize derived snapshots for %s diagnostics", (code, options) => {
+  ])("memoizes derived snapshots regardless of diagnostic shape (%s)", (code, options) => {
     const stateDir = tempStateDir();
     touchPersistedIndex(stateDir);
     loadPluginRegistrySnapshotWithMetadata.mockReturnValue({
@@ -318,6 +343,41 @@ describe("loadPluginMetadataSnapshot process memo", () => {
 
     loadPluginMetadataSnapshot({ config: {}, env: {}, stateDir, ...options });
     loadPluginMetadataSnapshot({ config: {}, env: {}, stateDir, ...options });
+
+    expect(loadPluginRegistrySnapshotWithMetadata).toHaveBeenCalledOnce();
+  });
+
+  it("hits the memo on consecutive identical lookups", () => {
+    const stateDir = tempStateDir();
+    touchPersistedIndex(stateDir);
+    loadPluginRegistrySnapshotWithMetadata.mockReturnValue({
+      source: "derived",
+      snapshot: makeIndex(),
+      diagnostics: [{ level: "warn", code: "persisted-registry-stale-source", message: "stale" }],
+    });
+
+    loadPluginMetadataSnapshot({ config: {}, env: {}, stateDir });
+    loadPluginMetadataSnapshot({ config: {}, env: {}, stateDir });
+    loadPluginMetadataSnapshot({ config: {}, env: {}, stateDir });
+
+    expect(loadPluginRegistrySnapshotWithMetadata).toHaveBeenCalledOnce();
+  });
+
+  it("retains entries for multiple input shapes without thrashing", () => {
+    const stateDir = tempStateDir();
+    touchPersistedIndex(stateDir);
+    loadPluginRegistrySnapshotWithMetadata.mockReturnValue({
+      source: "derived",
+      snapshot: makeIndex(),
+      diagnostics: [{ level: "warn", code: "persisted-registry-stale-source", message: "stale" }],
+    });
+
+    loadPluginMetadataSnapshot({ config: {}, env: {}, stateDir });
+    loadPluginMetadataSnapshot({ config: {}, env: {}, stateDir, preferPersisted: true });
+    loadPluginMetadataSnapshot({ config: {}, env: {}, stateDir });
+    loadPluginMetadataSnapshot({ config: {}, env: {}, stateDir, preferPersisted: true });
+    loadPluginMetadataSnapshot({ config: {}, env: {}, stateDir });
+    loadPluginMetadataSnapshot({ config: {}, env: {}, stateDir, preferPersisted: true });
 
     expect(loadPluginRegistrySnapshotWithMetadata).toHaveBeenCalledTimes(2);
   });

@@ -90,6 +90,7 @@ export function resolvePluginRuntimeLoadContext(
     config: rawConfig,
     env,
     manifestRegistry,
+    discovery: metadataSnapshot?.discovery,
   });
   const config = autoEnabled.config;
   const workspaceDir =
@@ -110,7 +111,7 @@ export function resolvePluginRuntimeLoadContext(
     workspaceDir,
     env,
     logger: options?.logger ?? createPluginRuntimeLoaderLogger(),
-    ...(manifestRegistry ? { manifestRegistry } : {}),
+    manifestRegistry,
     installRecords,
   };
 }
@@ -133,7 +134,7 @@ export function buildPluginRuntimeLoadOptionsFromValues(
     workspaceDir: values.workspaceDir,
     env: values.env,
     logger: values.logger,
-    ...(values.manifestRegistry ? { manifestRegistry: values.manifestRegistry } : {}),
+    manifestRegistry: values.manifestRegistry,
     installRecords: values.installRecords,
     ...overrides,
   };

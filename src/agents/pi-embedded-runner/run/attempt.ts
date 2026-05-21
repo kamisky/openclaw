@@ -1262,6 +1262,13 @@ export function shouldUseMinimalPromptForAttemptTools(params: {
   return constructionAllow.every((entry) => MINIMAL_PROMPT_ONLY_TOOL_NAMES.has(entry));
 }
 
+export function resolveAttemptSystemPromptReportSkillsPrompt(params: {
+  minimalPromptForTools: boolean;
+  skillsPrompt: string;
+}): string {
+  return params.minimalPromptForTools ? "" : params.skillsPrompt;
+}
+
 export async function runEmbeddedAttempt(
   params: EmbeddedRunAttemptParams,
 ): Promise<EmbeddedRunAttemptResult> {
@@ -2087,6 +2094,10 @@ export async function runEmbeddedAttempt(
     });
     const effectivePromptMode = minimalPromptForTools ? ("minimal" as const) : promptMode;
     const effectiveSkillsPrompt = minimalPromptForTools ? undefined : skillsPrompt;
+    const reportSkillsPrompt = resolveAttemptSystemPromptReportSkillsPrompt({
+      minimalPromptForTools,
+      skillsPrompt,
+    });
     const systemPromptStages = createEmbeddedRunStageTracker({
       onMark: (stage) =>
         emitEmbeddedAttemptStageMark({
@@ -2232,7 +2243,7 @@ export async function runEmbeddedAttempt(
       systemPrompt: appendPrompt,
       bootstrapFiles: hookAdjustedBootstrapFiles,
       injectedFiles: contextFiles,
-      skillsPrompt,
+      skillsPrompt: reportSkillsPrompt,
       tools: effectiveTools,
     });
     systemPromptStages.mark("build-report");

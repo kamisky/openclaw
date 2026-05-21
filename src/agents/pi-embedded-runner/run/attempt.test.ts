@@ -36,6 +36,7 @@ import {
   resolveAttemptToolPolicyMessageProvider,
   resolvePromptBuildHookResult,
   resolvePromptModeForSession,
+  resolveAttemptSystemPromptReportSkillsPrompt,
   shouldWarnOnOrphanedUserRepair,
   wrapStreamFnRepairMalformedToolCallArguments,
   wrapStreamFnSanitizeMalformedToolCalls,
@@ -1216,6 +1217,26 @@ describe("resolveEmbeddedAgentStreamFn", () => {
     });
 
     expect(streamFn).not.toBe(currentStreamFn);
+  });
+});
+
+describe("resolveAttemptSystemPromptReportSkillsPrompt", () => {
+  it("omits skipped skills from message-only minimal prompt reports", () => {
+    expect(
+      resolveAttemptSystemPromptReportSkillsPrompt({
+        minimalPromptForTools: true,
+        skillsPrompt: "<skill><name>slow</name></skill>",
+      }),
+    ).toBe("");
+  });
+
+  it("keeps skills in reports when they are rendered into the prompt", () => {
+    expect(
+      resolveAttemptSystemPromptReportSkillsPrompt({
+        minimalPromptForTools: false,
+        skillsPrompt: "<skill><name>needed</name></skill>",
+      }),
+    ).toBe("<skill><name>needed</name></skill>");
   });
 });
 

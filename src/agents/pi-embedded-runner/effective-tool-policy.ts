@@ -47,6 +47,7 @@ type FinalEffectiveToolPolicyParams = {
   agentId?: string;
   modelProvider?: string;
   modelId?: string;
+  effectiveToolPolicy?: ReturnType<typeof resolveEffectiveToolPolicy>;
   messageProvider?: string;
   agentAccountId?: string | null;
   groupId?: string | null;
@@ -86,13 +87,15 @@ export function applyFinalEffectiveToolPolicy(
     providerProfile,
     profileAlsoAllow,
     providerProfileAlsoAllow,
-  } = resolveEffectiveToolPolicy({
-    config: params.config,
-    sessionKey: params.sessionKey,
-    agentId: params.agentId,
-    modelProvider: params.modelProvider,
-    modelId: params.modelId,
-  });
+  } =
+    params.effectiveToolPolicy ??
+    resolveEffectiveToolPolicy({
+      config: params.config,
+      sessionKey: params.sessionKey,
+      agentId: params.agentId,
+      modelProvider: params.modelProvider,
+      modelId: params.modelId,
+    });
 
   const groupPolicy = resolveGroupToolPolicy({
     config: params.config,

@@ -797,6 +797,7 @@ export async function runEmbeddedPiAgent(
         }
         const resolvedOrder = resolveAuthProfileOrder({
           cfg: params.config,
+          workspaceDir: resolvedWorkspace,
           store: attemptAuthProfileStore,
           provider: harnessAuthProvider,
         }).filter(isForwardablePluginHarnessAuthProfile);
@@ -848,6 +849,7 @@ export async function runEmbeddedPiAgent(
       if (lockedProfileId && !pluginHarnessOwnsTransport) {
         const eligibility = resolveAuthProfileEligibility({
           cfg: params.config,
+          workspaceDir: resolvedWorkspace,
           store: authStore,
           provider,
           profileId: lockedProfileId,
@@ -868,6 +870,7 @@ export async function runEmbeddedPiAgent(
               }).flatMap((authProvider) =>
                 resolveAuthProfileOrder({
                   cfg: params.config,
+                  workspaceDir: resolvedWorkspace,
                   store: authStore,
                   provider: authProvider,
                   preferredProfile: preferredProfileId,

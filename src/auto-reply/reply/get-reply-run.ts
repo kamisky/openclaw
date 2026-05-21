@@ -961,7 +961,7 @@ export async function runPreparedReply(
     traceRunPhase("reply.resolve_auth_profile", () => resolveRuntimeAuthProfile()),
     traceRunPhase("reply.load_agent_runner_runtime", () => loadAgentRunnerRuntime()),
   ]);
-  const { authProfileId, authProfileIdSource } = runtimeAuthProfile;
+  let { authProfileId, authProfileIdSource } = runtimeAuthProfile;
   const { runReplyAgent } = agentRunnerRuntime;
   const queueKey = sessionKey ?? sessionIdFinal;
   preparedSessionState = resolvePreparedSessionState();

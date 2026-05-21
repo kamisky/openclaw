@@ -124,9 +124,25 @@ describe("WhatsApp QA live runtime", () => {
     expect(() => __testing.assertSafeArchiveEntries(["/tmp/creds.json"])).toThrow("unsafe entry");
   });
 
-  it("registers the WhatsApp canary and pairing scenarios", () => {
-    const scenarios = __testing.findScenarios(["whatsapp-canary", "whatsapp-pairing-block"]);
-    expect(scenarios.map(({ id }) => id)).toEqual(["whatsapp-canary", "whatsapp-pairing-block"]);
+  it("registers the WhatsApp canary, RTT, and pairing scenarios", () => {
+    const scenarios = __testing.findScenarios([
+      "whatsapp-canary",
+      "whatsapp-canary-rtt",
+      "whatsapp-pairing-block",
+    ]);
+    expect(scenarios.map(({ id }) => id)).toEqual([
+      "whatsapp-canary",
+      "whatsapp-canary-rtt",
+      "whatsapp-pairing-block",
+    ]);
+
+    const rttRun = scenarios.find(({ id }) => id === "whatsapp-canary-rtt")?.buildRun();
+    expect(rttRun).toMatchObject({
+      configMode: "allowlist",
+      expectReply: true,
+      target: "dm",
+    });
+    expect(rttRun?.input).toContain("Reply with only this exact marker:");
   });
 
   it("uses automatic visible replies for WhatsApp group mention gating", () => {
@@ -276,7 +292,11 @@ describe("WhatsApp QA live runtime", () => {
     try {
       const completePath = path.join(tempRoot, "complete.heapsnapshot");
       const partialPath = path.join(tempRoot, "partial.heapsnapshot");
-      await fs.writeFile(completePath, '{"snapshot":{},"nodes":[],"edges":[],"strings":[]}', "utf8");
+      await fs.writeFile(
+        completePath,
+        '{"snapshot":{},"nodes":[],"edges":[],"strings":[]}',
+        "utf8",
+      );
       await fs.writeFile(partialPath, '{"snapshot":{},"nodes":[],"edges":[],"strings":[', "utf8");
 
       await expect(

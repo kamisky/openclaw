@@ -50,6 +50,7 @@ export type WhatsAppQaRuntimeEnv = {
 
 type WhatsAppQaScenarioId =
   | "whatsapp-canary"
+  | "whatsapp-canary-rtt"
   | "whatsapp-pairing-block"
   | "whatsapp-mention-gating";
 
@@ -210,22 +211,31 @@ const whatsappQaCredentialPayloadSchema = z.object({
   groupJid: z.string().trim().min(1).optional(),
 });
 
+function buildWhatsAppCanaryRun(): WhatsAppQaScenarioRun {
+  const token = `WHATSAPP_QA_ECHO_${randomUUID().slice(0, 8).toUpperCase()}`;
+  return {
+    configMode: "allowlist",
+    expectReply: true,
+    input: `Reply with only this exact marker: ${token}`,
+    matchText: token,
+    target: "dm",
+  };
+}
+
 const WHATSAPP_QA_SCENARIOS: WhatsAppQaScenarioDefinition[] = [
   {
     id: "whatsapp-canary",
     standardId: "canary",
     title: "WhatsApp DM canary",
     timeoutMs: 60_000,
-    buildRun: () => {
-      const token = `WHATSAPP_QA_ECHO_${randomUUID().slice(0, 8).toUpperCase()}`;
-      return {
-        configMode: "allowlist",
-        expectReply: true,
-        input: `Reply with only this exact marker: ${token}`,
-        matchText: token,
-        target: "dm",
-      };
-    },
+    buildRun: buildWhatsAppCanaryRun,
+  },
+  {
+    id: "whatsapp-canary-rtt",
+    standardId: "canary",
+    title: "WhatsApp DM canary RTT",
+    timeoutMs: 60_000,
+    buildRun: buildWhatsAppCanaryRun,
   },
   {
     id: "whatsapp-pairing-block",
@@ -277,11 +287,13 @@ function appendNodeOption(raw: string | undefined, option: string) {
   return parts.includes(option) ? parts.join(" ") : [...parts, option].join(" ");
 }
 
-function buildWhatsAppGatewayRuntimeEnvPatch(params: {
-  env?: NodeJS.ProcessEnv;
-  timelinePath?: string;
-  tracePath?: string;
-} = {}): NodeJS.ProcessEnv | undefined {
+function buildWhatsAppGatewayRuntimeEnvPatch(
+  params: {
+    env?: NodeJS.ProcessEnv;
+    timelinePath?: string;
+    tracePath?: string;
+  } = {},
+): NodeJS.ProcessEnv | undefined {
   const env = params.env ?? process.env;
   const patch: NodeJS.ProcessEnv = {};
   if (isTruthyOptIn(env[WHATSAPP_QA_GATEWAY_HEAP_CHECKPOINTS_ENV])) {
@@ -390,12 +402,7 @@ function findScenarios(ids?: string[]) {
   });
 }
 
-const WHATSAPP_QA_DENIED_MODEL_TOOLS = [
-  "bundle-mcp",
-  "session_status",
-  "sessions_*",
-  "web_search",
-];
+const WHATSAPP_QA_DENIED_MODEL_TOOLS = ["bundle-mcp", "session_status", "sessions_*", "web_search"];
 
 function mergeDeniedModelTools(existing?: string[]): string[] {
   return [...new Set([...(existing ?? []), ...WHATSAPP_QA_DENIED_MODEL_TOOLS])];
@@ -793,10 +800,7 @@ async function startWhatsAppQaDriverSessionWithRetry(params: { authDir: string }
 }
 
 async function runWhatsAppScenario(params: {
-  captureGatewayHeapCheckpoint?: (
-    gateway: WhatsAppQaGatewayHandle,
-    label: string,
-  ) => Promise<void>;
+  captureGatewayHeapCheckpoint?: (gateway: WhatsAppQaGatewayHandle, label: string) => Promise<void>;
   driver: WhatsAppQaDriverSession;
   driverPhoneE164: string;
   gatewayDebugDirPath: string;
@@ -856,10 +860,7 @@ async function runWhatsAppScenario(params: {
       }),
   });
   const gatewayStartMs = Date.now() - gatewayStartStartedAtMs;
-  params.sampleGatewayProcessRss?.(
-    gatewayHarness.gateway,
-    `${params.scenario.id}:gateway-start`,
-  );
+  params.sampleGatewayProcessRss?.(gatewayHarness.gateway, `${params.scenario.id}:gateway-start`);
   let preservedGatewayDebug = false;
   try {
     const channelReadyStartedAtMs = Date.now();

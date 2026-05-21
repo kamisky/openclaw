@@ -7,6 +7,7 @@ vi.mock("../context-engine-capabilities.js", () => ({
 import type { OpenClawConfig } from "../../../config/config.js";
 import { addSession, resetProcessRegistryForTests } from "../../bash-process-registry.js";
 import { createProcessSessionFixture } from "../../bash-process-registry.test-helpers.js";
+import type { resolveEffectiveToolPolicy } from "../../pi-tools.policy.js";
 import { SYSTEM_PROMPT_CACHE_BOUNDARY } from "../../system-prompt-cache-boundary.js";
 import { buildAgentSystemPrompt } from "../../system-prompt.js";
 import { resolveBootstrapContextTargets } from "./attempt-bootstrap-routing.js";
@@ -157,6 +158,34 @@ describe("resolveAttemptConstructionToolsAllow", () => {
         runtimeToolsAllow: ["read"],
       }),
     ).toEqual(["read"]);
+  });
+
+  it("reuses a precomputed effective policy for construction allowlists", () => {
+    const effectiveToolPolicy = {
+      agentId: undefined,
+      globalPolicy: undefined,
+      globalProviderPolicy: undefined,
+      agentPolicy: undefined,
+      agentProviderPolicy: undefined,
+      profile: "messaging",
+      providerProfile: undefined,
+      profileAlsoAllow: undefined,
+      providerProfileAlsoAllow: undefined,
+    } satisfies ReturnType<typeof resolveEffectiveToolPolicy>;
+
+    expect(
+      resolveAttemptConstructionToolsAllow({
+        config: { tools: { profile: "coding" } },
+        effectiveToolPolicy,
+      }),
+    ).toEqual([
+      "sessions_list",
+      "sessions_history",
+      "sessions_send",
+      "session_status",
+      "message",
+      "bundle-mcp",
+    ]);
   });
 
   it("keeps no-profile runs unrestricted when message delivery is forced", () => {

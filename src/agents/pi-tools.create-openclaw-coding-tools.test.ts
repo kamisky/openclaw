@@ -105,6 +105,9 @@ function applyRuntimeToolsAllow<T extends { name: string }>(tools: T[], toolsAll
 }
 
 type OpenClawCodingTool = ReturnType<typeof createOpenClawCodingTools>[number];
+type CreateOpenClawCodingToolsOptions = NonNullable<
+  Parameters<typeof createOpenClawCodingTools>[0]
+>;
 type OpenClawToolsOptions = NonNullable<Parameters<typeof createOpenClawTools>[0]>;
 
 function toolNameList(tools: readonly { name: string }[]): string[] {
@@ -664,6 +667,27 @@ describe("createOpenClawCodingTools", () => {
     expectListIncludes(inheritedAllow, ["read", "sessions_spawn"]);
     expect(inheritedAllow?.includes("exec")).toBe(false);
     expect(inheritedAllow?.includes("process")).toBe(false);
+  });
+
+  it("reuses caller-resolved effective tool policy", () => {
+    const effectiveToolPolicy = {
+      agentId: undefined,
+      globalPolicy: { allow: ["message"] },
+      globalProviderPolicy: undefined,
+      agentPolicy: undefined,
+      agentProviderPolicy: undefined,
+      profile: undefined,
+      providerProfile: undefined,
+      profileAlsoAllow: undefined,
+      providerProfileAlsoAllow: undefined,
+    } satisfies CreateOpenClawCodingToolsOptions["effectiveToolPolicy"];
+
+    const tools = createOpenClawCodingTools({
+      config: { tools: { allow: ["read"] } },
+      effectiveToolPolicy,
+    });
+
+    expect(toolNameList(tools)).toEqual(["message"]);
   });
 
   it("records core tool-prep stages for hot-path diagnostics", () => {

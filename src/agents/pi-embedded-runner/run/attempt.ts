@@ -1184,6 +1184,7 @@ export function resolveAttemptConstructionToolsAllow(params: {
   agentId?: string;
   modelProvider?: string;
   modelId?: string;
+  effectiveToolPolicy?: ReturnType<typeof resolveEffectiveToolPolicy>;
   runtimeToolsAllow?: string[];
   sourceReplyDeliveryMode?: EmbeddedRunAttemptParams["sourceReplyDeliveryMode"];
   trigger?: EmbeddedRunAttemptParams["trigger"];
@@ -1194,13 +1195,15 @@ export function resolveAttemptConstructionToolsAllow(params: {
   if (params.runtimeToolsAllow !== undefined) {
     return params.runtimeToolsAllow;
   }
-  const policy = resolveEffectiveToolPolicy({
-    config: params.config,
-    sessionKey: params.sessionKey,
-    agentId: params.agentId,
-    modelProvider: params.modelProvider,
-    modelId: params.modelId,
-  });
+  const policy =
+    params.effectiveToolPolicy ??
+    resolveEffectiveToolPolicy({
+      config: params.config,
+      sessionKey: params.sessionKey,
+      agentId: params.agentId,
+      modelProvider: params.modelProvider,
+      modelId: params.modelId,
+    });
   const shouldForceMessageTool =
     params.forceMessageTool === true || params.sourceReplyDeliveryMode === "message_tool_only";
   const shouldForceHeartbeatTool =
@@ -1467,12 +1470,23 @@ export async function runEmbeddedAttempt(
             params.config?.messages?.visibleReplies === "message_tool"),
       },
     );
+    const constructionEffectiveToolPolicy =
+      toolsAllowWithForcedRuntimeTools === undefined
+        ? resolveEffectiveToolPolicy({
+            config: params.config,
+            sessionKey: sandboxSessionKey,
+            agentId: sessionAgentId,
+            modelProvider: params.provider,
+            modelId: params.modelId,
+          })
+        : undefined;
     const constructionToolsAllow = resolveAttemptConstructionToolsAllow({
       config: params.config,
-      sessionKey: params.sessionKey,
+      sessionKey: sandboxSessionKey,
       agentId: sessionAgentId,
       modelProvider: params.provider,
       modelId: params.modelId,
+      effectiveToolPolicy: constructionEffectiveToolPolicy,
       runtimeToolsAllow: toolsAllowWithForcedRuntimeTools,
       sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,
       trigger: params.trigger,
@@ -1567,6 +1581,7 @@ export async function runEmbeddedAttempt(
             abortSignal: runAbortController.signal,
             modelProvider: params.provider,
             modelId: params.modelId,
+            effectiveToolPolicy: constructionEffectiveToolPolicy,
             modelCompat: extractModelCompat(params.model),
             modelApi: params.model.api,
             modelContextWindowTokens: params.model.contextWindow,

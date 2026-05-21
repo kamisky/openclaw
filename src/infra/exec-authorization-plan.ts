@@ -19,6 +19,7 @@ import {
 import {
   hasPosixInteractiveStartupBeforeInlineCommand,
   hasPosixLoginStartupBeforeInlineCommand,
+  isDirectShellPositionalCarrierCommand,
   POSIX_INLINE_COMMAND_FLAGS,
   resolveInlineCommandMatch,
 } from "./shell-inline-command.js";
@@ -28,13 +29,7 @@ const POSIX_SHELL_NAMES: ReadonlySet<string> = new Set(POSIX_SHELL_WRAPPERS);
 
 export type ExecAuthorizationDialect = "argv" | "posix-shell" | "windows-cmd" | "powershell";
 
-export type ExecAuthorizationRelationship =
-  | "simple"
-  | "pipeline"
-  | "sequence"
-  | "and"
-  | "or"
-  | "wrapper-inline";
+type ExecAuthorizationRelationship = "simple" | "pipeline";
 
 export type ExecAuthorizationTransport =
   | { kind: "direct" }
@@ -48,10 +43,8 @@ export type ExecAuthorizationTransport =
 export type ExecAuthorizationTrustMode = "executable" | "exact-command" | "prompt-only";
 
 export type ExecAuthorizationCandidate = {
-  argv: string[];
   sourceSegment: ExecCommandSegment;
-  sourceStep: CommandStep;
-  relationship: ExecAuthorizationRelationship;
+  sourceStepId?: string;
   transport: ExecAuthorizationTransport;
   trustMode: ExecAuthorizationTrustMode;
   allowAlways: boolean;
@@ -59,8 +52,6 @@ export type ExecAuthorizationCandidate = {
 };
 
 export type ExecAuthorizationGroup = {
-  relationship: ExecAuthorizationRelationship;
-  opFromPrevious?: ShellChainOperator | null;
   opToNext?: ShellChainOperator | null;
   candidates: ExecAuthorizationCandidate[];
 };
@@ -71,9 +62,7 @@ export type ExecAuthorizationPlan =
       dialect: ExecAuthorizationDialect;
       originalCommand: string;
       groups: ExecAuthorizationGroup[];
-      executionSegments: ExecCommandSegment[];
       operators: CommandOperator[];
-      risks: CommandRisk[];
     }
   | {
       ok: false;
@@ -81,9 +70,7 @@ export type ExecAuthorizationPlan =
       originalCommand: string;
       reason: string;
       groups: [];
-      executionSegments: [];
       operators: [];
-      risks: CommandRisk[];
     };
 
 type CommandStepWithSegment = {
@@ -94,11 +81,6 @@ type CommandStepWithSegment = {
 type PlanningContext = {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
-};
-
-type WrapperPayloadPlan = {
-  groups: ExecAuthorizationGroup[];
-  reasons: string[];
 };
 
 const PROMPT_ONLY_RISKS = new Set<CommandRisk["kind"]>([
@@ -112,17 +94,19 @@ const PROMPT_ONLY_RISKS = new Set<CommandRisk["kind"]>([
 ]);
 
 const UNANALYZABLE_RISKS = new Set<CommandRisk["kind"]>([
+  "command-substitution",
   "dynamic-executable",
   "line-continuation",
   "heredoc",
   "here-string",
+  "process-substitution",
   "redirect",
   "syntax-error",
 ]);
 
 const POWERSHELL_NAMES = new Set(["powershell", "pwsh"]);
 const WINDOWS_CMD_NAMES = new Set(["cmd", "cmd.exe"]);
-const POSITIONAL_CARRIER_BLOCKED_EXECUTABLES = new Set(["find", "xargs"]);
+export const POSITIONAL_CARRIER_BLOCKED_EXECUTABLES = new Set(["find", "xargs"]);
 
 function commandSegmentFromStep(step: CommandStep, context: PlanningContext): ExecCommandSegment {
   return {
@@ -145,21 +129,6 @@ function commandSegmentFromArgv(
   };
 }
 
-function relationshipForOperator(
-  operator: ShellChainOperator | null | undefined,
-): ExecAuthorizationRelationship {
-  if (operator === "&&") {
-    return "and";
-  }
-  if (operator === "||") {
-    return "or";
-  }
-  if (operator === ";") {
-    return "sequence";
-  }
-  return "simple";
-}
-
 type AuthorizationOperator = ShellChainOperator | "pipe";
 
 function authorizationOperatorForTopology(operator: CommandOperator): AuthorizationOperator {
@@ -173,8 +142,9 @@ function authorizationOperatorForTopology(operator: CommandOperator): Authorizat
       return "pipe";
     case "sequence":
     case "newline-sequence":
-    case "background":
       return ";";
+    case "background":
+      return "&";
     default: {
       const unreachable: never = operator.kind;
       return unreachable;
@@ -196,9 +166,32 @@ function stepReasons(step: CommandStep, risks: readonly CommandRisk[]): string[]
   return [...new Set(reasons)];
 }
 
+function isShellExpansionDynamicArgument(risk: CommandRisk): boolean {
+  return (
+    risk.kind === "dynamic-argument" &&
+    /(?:\$[A-Za-z0-9_@*?#$!-]|\$\{|`|\$\(|[<>]\()/u.test(risk.text)
+  );
+}
+
+function riskInsidePromptOnlyStep(risk: CommandRisk, explanation: CommandExplanation): boolean {
+  return [...explanation.topLevelCommands, ...explanation.nestedCommands].some(
+    (step) => riskInsideStep(risk, step) && stepReasons(step, explanation.risks).length > 0,
+  );
+}
+
 function hasBlockingRisk(explanation: CommandExplanation): string | null {
   const risk = explanation.risks.find((entry) => UNANALYZABLE_RISKS.has(entry.kind));
-  return risk ? risk.kind : null;
+  if (risk) {
+    return risk.kind;
+  }
+  const dynamicArgument = explanation.risks.find(
+    (entry) =>
+      isShellExpansionDynamicArgument(entry) && !riskInsidePromptOnlyStep(entry, explanation),
+  );
+  if (dynamicArgument) {
+    return dynamicArgument.kind;
+  }
+  return null;
 }
 
 function isPathScopedExecutableToken(token: string): boolean {
@@ -230,21 +223,6 @@ function canUseWrapperShellInvocation(argv: string[]): boolean {
   );
 }
 
-function isDirectShellPositionalCarrierInvocation(command: string): boolean {
-  const trimmed = command.trim();
-  if (trimmed.length === 0) {
-    return false;
-  }
-
-  const shellWhitespace = String.raw`[^\S\r\n]+`;
-  const positionalZero = String.raw`(?:\$(?:0|\{0\})|"\$(?:0|\{0\})")`;
-  const positionalArg = String.raw`(?:\$(?:[@*]|[1-9]|\{[@*1-9]\})|"\$(?:[@*]|[1-9]|\{[@*1-9]\})")`;
-  return new RegExp(
-    `^(?:exec${shellWhitespace}(?:--${shellWhitespace})?)?${positionalZero}(?:${shellWhitespace}${positionalArg})*$`,
-    "u",
-  ).test(trimmed);
-}
-
 function positionalCarrierSteps(params: {
   wrapper: CommandStepWithSegment;
   context: PlanningContext;
@@ -260,7 +238,7 @@ function positionalCarrierSteps(params: {
   if (!canUseWrapperShellInvocation(params.wrapper.segment.argv)) {
     return null;
   }
-  if (!isDirectShellPositionalCarrierInvocation(inlineMatch.command)) {
+  if (!isDirectShellPositionalCarrierCommand(inlineMatch.command)) {
     return null;
   }
   const carriedArgv = params.wrapper.segment.argv
@@ -339,10 +317,8 @@ function createCandidate(params: {
           ? "prompt-only"
           : "executable";
   return {
-    argv: params.segment.argv,
     sourceSegment: params.segment,
-    sourceStep: params.step,
-    relationship: params.relationship,
+    ...(params.step.id ? { sourceStepId: params.step.id } : {}),
     transport: params.transport,
     trustMode,
     allowAlways: shouldPersistCandidate({
@@ -357,15 +333,12 @@ function createCandidate(params: {
 function finalizeGroup(params: {
   steps: CommandStepWithSegment[];
   relationship: ExecAuthorizationRelationship;
-  opFromPrevious: ShellChainOperator | null;
   opToNext: ShellChainOperator | null;
   transport: ExecAuthorizationTransport;
   risks: readonly CommandRisk[];
 }): ExecAuthorizationGroup {
   const relationship = params.steps.length > 1 ? "pipeline" : params.relationship;
   return {
-    relationship,
-    opFromPrevious: params.opFromPrevious,
     opToNext: params.opToNext,
     candidates: params.steps.map((entry) =>
       createCandidate({
@@ -390,7 +363,6 @@ function groupsFromSteps(params: {
   );
   const groups: ExecAuthorizationGroup[] = [];
   let current: CommandStepWithSegment[] = [];
-  let opFromPrevious: ShellChainOperator | null = null;
   const operatorByFromCommandId = new Map<string, AuthorizationOperator>();
   for (const operator of params.operators ?? []) {
     operatorByFromCommandId.set(operator.fromCommandId, authorizationOperatorForTopology(operator));
@@ -401,7 +373,6 @@ function groupsFromSteps(params: {
       finalizeGroup({
         steps: sorted,
         relationship: "pipeline",
-        opFromPrevious: null,
         opToNext: null,
         transport: params.transport,
         risks: params.risks,
@@ -425,27 +396,27 @@ function groupsFromSteps(params: {
       current.push(entry);
       continue;
     }
-    const opToNext = operator === "&&" || operator === "||" || operator === ";" ? operator : ";";
+    const opToNext =
+      operator === "&&" || operator === "||" || operator === ";" || operator === "&"
+        ? operator
+        : ";";
     groups.push(
       finalizeGroup({
         steps: current,
-        relationship: relationshipForOperator(opFromPrevious),
-        opFromPrevious,
+        relationship: "simple",
         opToNext,
         transport: params.transport,
         risks: params.risks,
       }),
     );
     current = [entry];
-    opFromPrevious = opToNext;
   }
 
   if (current.length > 0) {
     groups.push(
       finalizeGroup({
         steps: current,
-        relationship: relationshipForOperator(opFromPrevious),
-        opFromPrevious,
+        relationship: "simple",
         opToNext: null,
         transport: params.transport,
         risks: params.risks,
@@ -495,7 +466,7 @@ function wrapperPayloadPlan(params: {
   nestedSteps: CommandStepWithSegment[];
   operators: readonly CommandOperator[];
   risks: readonly CommandRisk[];
-}): WrapperPayloadPlan | null {
+}): ExecAuthorizationGroup[] | null {
   const wrapper = params.topLevelSteps[0];
   if (!wrapper) {
     return null;
@@ -520,7 +491,7 @@ function wrapperPayloadPlan(params: {
       transport,
       risks: params.risks,
     });
-    return groups.length > 0 ? { groups, reasons: [] } : null;
+    return groups.length > 0 ? groups : null;
   }
   if (!params.allowNestedPayload) {
     return null;
@@ -553,7 +524,7 @@ function wrapperPayloadPlan(params: {
     transport,
     risks: params.risks,
   });
-  return groups.length > 0 ? { groups, reasons: [] } : null;
+  return groups.length > 0 ? groups : null;
 }
 
 function dialectForArgv(argv: readonly string[]): ExecAuthorizationDialect {
@@ -571,7 +542,6 @@ function unanalyzablePlan(params: {
   dialect: ExecAuthorizationDialect;
   command: string;
   reason: string;
-  risks?: CommandRisk[];
 }): ExecAuthorizationPlan {
   return {
     ok: false,
@@ -579,9 +549,7 @@ function unanalyzablePlan(params: {
     originalCommand: params.command,
     reason: params.reason,
     groups: [],
-    executionSegments: [],
     operators: [],
-    risks: params.risks ?? [],
   };
 }
 
@@ -612,7 +580,6 @@ function planFromExplanation(params: {
       dialect: "posix-shell",
       command: params.command,
       reason: blockingRisk ?? "unable to parse command",
-      risks: params.explanation.risks,
     });
   }
 
@@ -625,7 +592,7 @@ function planFromExplanation(params: {
     risks: params.explanation.risks,
   });
   const groups =
-    payloadPlan?.groups ??
+    payloadPlan ??
     groupsFromSteps({
       steps: topLevelSteps,
       operators: (params.explanation.operators ?? []).filter(
@@ -639,7 +606,6 @@ function planFromExplanation(params: {
       dialect: "posix-shell",
       command: params.command,
       reason: "no commands to authorize",
-      risks: params.explanation.risks,
     });
   }
   return {
@@ -647,9 +613,7 @@ function planFromExplanation(params: {
     dialect: "posix-shell",
     originalCommand: params.command,
     groups,
-    executionSegments: topLevelSteps.map((entry) => entry.segment),
     operators: params.explanation.operators ?? [],
-    risks: params.explanation.risks,
   };
 }
 
@@ -747,9 +711,7 @@ export async function planExecAuthorization(params: {
             dialect: "argv",
             originalCommand: command,
             groups,
-            executionSegments: [wrapperSegment],
             operators: shellPlan.operators,
-            risks: shellPlan.risks,
           };
         }
       }
@@ -794,8 +756,6 @@ export async function planExecAuthorization(params: {
     dialect: "argv",
     originalCommand: command,
     groups,
-    executionSegments: params.analysis.segments,
     operators: [],
-    risks: [],
   };
 }

@@ -67,7 +67,7 @@ function operatorAfterCandidate(params: {
   operators: readonly CommandOperator[];
   candidate: ExecAuthorizationCandidate;
 }): string | null {
-  const stepId = params.candidate.sourceStep.id;
+  const stepId = params.candidate.sourceStepId;
   if (!stepId) {
     return null;
   }

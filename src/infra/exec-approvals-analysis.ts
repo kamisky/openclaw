@@ -48,7 +48,7 @@ export type ExecCommandAnalysis = {
   chains?: ExecCommandSegment[][];
 };
 
-export type ShellChainOperator = "&&" | "||" | ";";
+export type ShellChainOperator = "&&" | "||" | ";" | "&";
 
 export type ShellChainPart = {
   part: string;

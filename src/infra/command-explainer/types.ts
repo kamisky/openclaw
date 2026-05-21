@@ -45,8 +45,6 @@ export type CommandOperatorKind =
   | "stderr-pipe"
   | "background";
 
-export type CommandGroupKind = "pipeline" | "chain";
-
 export type CommandOperator = {
   id: string;
   kind: CommandOperatorKind;
@@ -55,26 +53,6 @@ export type CommandOperator = {
   fromCommandId: string;
   toCommandId: string;
   parentCommandId?: string;
-};
-
-export type CommandGroup = {
-  id: string;
-  kind: CommandGroupKind;
-  text: string;
-  span: SourceSpan;
-  commandIds: string[];
-  operatorIds: string[];
-  parentCommandId?: string;
-};
-
-export type WrapperPayloadParseStatus = "parsed" | "syntax-error";
-
-export type WrapperPayloadExplanation = {
-  parentCommandId: string;
-  payload: string;
-  span: SourceSpan;
-  parseStatus: WrapperPayloadParseStatus;
-  commandIds: string[];
 };
 
 export type CommandRisk =
@@ -115,8 +93,6 @@ export type CommandExplanation = {
   shapes: CommandShape[];
   topLevelCommands: CommandStep[];
   nestedCommands: CommandStep[];
-  groups?: CommandGroup[];
   operators?: CommandOperator[];
-  wrapperPayloads?: WrapperPayloadExplanation[];
   risks: CommandRisk[];
 };

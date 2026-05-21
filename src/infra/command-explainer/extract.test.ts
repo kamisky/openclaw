@@ -324,23 +324,14 @@ describe("command explainer tree-sitter runtime", () => {
     ]);
   });
 
-  it("emits stable command topology metadata for operators, groups, and shell wrapper payloads", async () => {
+  it("emits stable command topology metadata for operators and shell wrapper payload commands", async () => {
     const chained = await explainShellCommand("git status && npm test; pwd");
     expect(chained.topLevelCommands.map((step) => step.id)).toEqual([
       "command-0",
       "command-1",
       "command-2",
     ]);
-    const chainedGroups = chained.groups ?? [];
     const chainedOperators = chained.operators ?? [];
-    expect(chainedGroups).toEqual([
-      expect.objectContaining({
-        id: "group-0",
-        kind: "chain",
-        commandIds: ["command-0", "command-1", "command-2"],
-        operatorIds: ["operator-0", "operator-1"],
-      }),
-    ]);
     expect(
       chainedOperators.map((operator) => ({
         id: operator.id,
@@ -414,19 +405,10 @@ describe("command explainer tree-sitter runtime", () => {
 
     const wrapper = await explainShellCommand("sh -c 'git status && npm test'");
     const wrapperOperators = wrapper.operators ?? [];
-    const wrapperPayloads = wrapper.wrapperPayloads ?? [];
     expect(wrapper.topLevelCommands.map((step) => step.id)).toEqual(["command-0"]);
     expect(wrapper.nestedCommands.map((step) => [step.id, step.parentCommandId])).toEqual([
       ["command-1", "command-0"],
       ["command-2", "command-0"],
-    ]);
-    expect(wrapperPayloads).toEqual([
-      expect.objectContaining({
-        parentCommandId: "command-0",
-        payload: "git status && npm test",
-        parseStatus: "parsed",
-        commandIds: ["command-1", "command-2"],
-      }),
     ]);
     expect(wrapperOperators).toEqual([
       expect.objectContaining({

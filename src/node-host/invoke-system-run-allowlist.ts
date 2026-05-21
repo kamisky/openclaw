@@ -126,12 +126,6 @@ export function resolveSystemRunExecArgv(params: {
   plannedAllowlistArgv: string[] | undefined;
   argv: string[];
   security: ExecSecurity;
-  approvals: ReturnType<typeof resolveExecApprovals>;
-  safeBins: ReturnType<typeof resolveExecSafeBinRuntimePolicy>["safeBins"];
-  safeBinProfiles: ReturnType<typeof resolveExecSafeBinRuntimePolicy>["safeBinProfiles"];
-  trustedSafeBinDirs: ReturnType<typeof resolveExecSafeBinRuntimePolicy>["trustedSafeBinDirs"];
-  skillBins: SkillBinTrustEntry[];
-  autoAllowSkills: boolean;
   isWindows: boolean;
   policy: {
     approvedByAsk: boolean;
@@ -171,6 +165,9 @@ export function resolveSystemRunExecArgv(params: {
     if (!params.authorizationPlan) {
       return null;
     }
+    if (params.authorizationPlan.originalCommand !== params.shellCommand) {
+      return null;
+    }
     const rebuilt = buildAuthorizedShellCommandFromPlan({
       plan: params.authorizationPlan,
       mode: "safeBins",
@@ -185,22 +182,6 @@ export function resolveSystemRunExecArgv(params: {
       nextCommand: rebuilt.command,
     });
     if (!rewrittenArgv) {
-      return null;
-    }
-    const rebuiltAllowlist = evaluateSystemRunAllowlist({
-      shellCommand: rebuilt.command,
-      argv: rewrittenArgv,
-      approvals: params.approvals,
-      security: params.security,
-      safeBins: params.safeBins,
-      safeBinProfiles: params.safeBinProfiles,
-      trustedSafeBinDirs: params.trustedSafeBinDirs,
-      cwd: params.cwd,
-      env: params.env,
-      skillBins: params.skillBins,
-      autoAllowSkills: params.autoAllowSkills,
-    });
-    if (!rebuiltAllowlist.analysisOk || !rebuiltAllowlist.allowlistSatisfied) {
       return null;
     }
     execArgv = rewrittenArgv;

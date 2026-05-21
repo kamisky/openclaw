@@ -20,21 +20,17 @@ import { parseBashForCommandExplanation } from "./tree-sitter-runtime.js";
 import type {
   CommandContext,
   CommandExplanation,
-  CommandGroup,
-  CommandGroupKind,
   CommandOperator,
   CommandOperatorKind,
   CommandRisk,
   CommandShape,
   CommandStep,
   SourceSpan,
-  WrapperPayloadExplanation,
 } from "./types.js";
 
 type MutableExplanation = {
   shapes: Set<CommandShape>;
   commands: CommandStep[];
-  wrapperPayloads: WrapperPayloadExplanation[];
   risks: CommandRisk[];
   hasParseError: boolean;
   nextCommandIndex: number;
@@ -80,11 +76,6 @@ type SpanBase = {
 const ROOT_SPAN_BASE: SpanBase = {
   startIndex: 0,
   startPosition: { row: 0, column: 0 },
-};
-
-type ResolvedTopology = {
-  groups: CommandGroup[];
-  operators: CommandOperator[];
 };
 
 type CommandTopologyBucket = {
@@ -184,25 +175,6 @@ function spanFromSourceRange(source: string, startIndex: number, endIndex: numbe
     endIndex,
     startPosition: positionAtSourceIndex(source, startIndex),
     endPosition: positionAtSourceIndex(source, endIndex),
-  };
-}
-
-function spanFromPayloadBase(payload: string, base: SpanBase): SourceSpan {
-  if (base.mapOffset) {
-    const start = base.mapOffset(0);
-    const end = base.mapOffset(payload.length);
-    return {
-      startIndex: start.index,
-      endIndex: end.index,
-      startPosition: start.position,
-      endPosition: end.position,
-    };
-  }
-  return {
-    startIndex: base.startIndex,
-    endIndex: base.startIndex + payload.length,
-    startPosition: base.startPosition,
-    endPosition: advancePosition(base.startPosition, payload),
   };
 }
 
@@ -1149,15 +1121,6 @@ async function walk(
           parsed.dynamicArguments,
         );
         if (wrapperPayload && state.wrapperPayloadDepth < MAX_WRAPPER_PAYLOAD_DEPTH) {
-          const wrapperPayloadRecord: WrapperPayloadExplanation = {
-            parentCommandId: commandId,
-            payload: wrapperPayload.command,
-            span: spanFromPayloadBase(wrapperPayload.command, wrapperPayload.spanBase),
-            parseStatus: "parsed",
-            commandIds: [],
-          };
-          output.wrapperPayloads.push(wrapperPayloadRecord);
-          const firstPayloadCommandIndex = output.commands.length;
           const wrapperTree = await parseBashForCommandExplanation(wrapperPayload.command);
           const wrapperSpanBase = spanBaseForParserSource(
             wrapperPayload.command,
@@ -1167,7 +1130,6 @@ async function walk(
           try {
             if (wrapperTree.rootNode.hasError) {
               output.hasParseError = true;
-              wrapperPayloadRecord.parseStatus = "syntax-error";
               output.risks.push({
                 kind: "syntax-error",
                 text: wrapperPayload.command,
@@ -1179,11 +1141,6 @@ async function walk(
               spanBase: wrapperSpanBase,
               parentCommandId: commandId,
             });
-            wrapperPayloadRecord.commandIds = output.commands
-              .slice(firstPayloadCommandIndex)
-              .filter((command) => command.parentCommandId === commandId)
-              .map((command) => command.id)
-              .filter((id): id is string => id !== undefined);
           } finally {
             wrapperTree.delete();
           }
@@ -1264,18 +1221,10 @@ function topologyOperatorFromSeparator(
   return best;
 }
 
-function groupKindForOperators(operators: CommandOperator[]): CommandGroupKind {
-  return operators.every((operator) => operator.kind === "pipe" || operator.kind === "stderr-pipe")
-    ? "pipeline"
-    : "chain";
-}
-
-function resolveTopology(source: string, commands: CommandStep[]): ResolvedTopology {
+function resolveOperators(source: string, commands: CommandStep[]): CommandOperator[] {
   const operators: CommandOperator[] = [];
-  const groups: CommandGroup[] = [];
 
   for (const bucket of commandTopologyBuckets(commands)) {
-    const bucketOperators: CommandOperator[] = [];
     for (let index = 0; index < bucket.commands.length - 1; index += 1) {
       const fromCommand = bucket.commands[index];
       const toCommand = bucket.commands[index + 1];
@@ -1305,33 +1254,10 @@ function resolveTopology(source: string, commands: CommandStep[]): ResolvedTopol
         topologyOperator.parentCommandId = bucket.parentCommandId;
       }
       operators.push(topologyOperator);
-      bucketOperators.push(topologyOperator);
-    }
-
-    if (bucket.commands.length > 1 && bucketOperators.length > 0) {
-      const firstCommand = bucket.commands[0];
-      const lastCommand = bucket.commands[bucket.commands.length - 1];
-      if (!firstCommand || !lastCommand) {
-        continue;
-      }
-      const group: CommandGroup = {
-        id: `group-${groups.length}`,
-        kind: groupKindForOperators(bucketOperators),
-        text: source.slice(firstCommand.span.startIndex, lastCommand.span.endIndex),
-        span: spanFromSourceRange(source, firstCommand.span.startIndex, lastCommand.span.endIndex),
-        commandIds: bucket.commands
-          .map((command) => command.id)
-          .filter((id): id is string => id !== undefined),
-        operatorIds: bucketOperators.map((operator) => operator.id),
-      };
-      if (bucket.parentCommandId) {
-        group.parentCommandId = bucket.parentCommandId;
-      }
-      groups.push(group);
     }
   }
 
-  return { groups, operators };
+  return operators;
 }
 
 export async function explainShellCommand(source: string): Promise<CommandExplanation> {
@@ -1341,7 +1267,6 @@ export async function explainShellCommand(source: string): Promise<CommandExplan
     const output: MutableExplanation = {
       shapes: new Set(),
       commands: [],
-      wrapperPayloads: [],
       risks: [],
       hasParseError: tree.rootNode.hasError,
       nextCommandIndex: 0,
@@ -1351,16 +1276,14 @@ export async function explainShellCommand(source: string): Promise<CommandExplan
       spanBase,
     });
     const topLevelCommands = output.commands.filter((command) => command.context === "top-level");
-    const topology = resolveTopology(source, output.commands);
+    const operators = resolveOperators(source, output.commands);
     return {
       ok: !output.hasParseError,
       source,
       shapes: [...output.shapes],
       topLevelCommands,
       nestedCommands: output.commands.filter((command) => command.context !== "top-level"),
-      groups: topology.groups,
-      operators: topology.operators,
-      wrapperPayloads: output.wrapperPayloads,
+      operators,
       risks: output.risks,
     };
   } finally {

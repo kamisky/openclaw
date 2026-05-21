@@ -12,9 +12,9 @@ inputs:
     required: false
     default: "node24-pnpm11"
   pnpm-version:
-    description: pnpm version for corepack.
+    description: Optional pnpm version override. Defaults to packageManager in package.json.
     required: false
-    default: "11.0.8"
+    default: ""
   install-bun:
     description: Whether to install Bun alongside Node.
     required: false

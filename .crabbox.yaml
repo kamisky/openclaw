@@ -32,6 +32,7 @@ sync:
   baseRef: main
   exclude:
     - .artifacts
+    - .tmp
     - .codex
     - .DS_Store
     - playwright-report

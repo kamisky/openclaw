@@ -1728,7 +1728,7 @@ describe("runCodexAppServerAttempt", () => {
               : tools,
           logDiagnostics: () => undefined,
         },
-      } as NonNullable<EmbeddedRunAttemptParams["runtimePlan"]>;
+      } as unknown as NonNullable<EmbeddedRunAttemptParams["runtimePlan"]>;
       if (trigger) {
         params.trigger = trigger;
       }

@@ -11,7 +11,7 @@ Docs: https://docs.openclaw.ai
 - Agents/tools: remove the old sender-owner tool gating path so configured tools stay visible for trusted sessions while command and channel-action auth still carry real sender identity.
 - QA-Lab: add curated mock JSONL replay fixtures and first-drift reporting for runtime-parity audits. (#80323, refs #80176) Thanks @100yenadmin.
 - QA-Lab: add a personal-agent failure recovery scenario that checks honest partial status, retry boundaries, and local recovery artifacts. (#83872) Thanks @iFiras-Max1.
-- Release/security: ship the root npm package and OpenClaw-owned npm plugins with generated shrinkwrap and require review for lockfile/shrinkwrap changes so published installs use locked dependency graphs.
+- Release/security: ship the root npm package and OpenClaw-owned npm plugins with generated shrinkwrap, bundle OpenClaw-owned plugin runtime dependencies into their npm tarballs, and require review for lockfile/shrinkwrap changes so published installs use locked dependency graphs.
 - Tests/perf: isolate doctor core health check unit coverage from real skills/workspace discovery so `doctor-core-checks` no longer dominates unit perf while keeping one real skills-readiness smoke. (#84493) Thanks @frankekn.
 
 ### Fixes

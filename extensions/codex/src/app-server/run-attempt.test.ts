@@ -1718,10 +1718,19 @@ describe("runCodexAppServerAttempt", () => {
     const createRunParams = (trigger?: EmbeddedRunAttemptParams["trigger"]) => {
       const params = createParams(sessionFile, workspaceDir);
       params.disableTools = false;
-      params.runtimePlan = createCodexRuntimePlanFixture();
+      const runtimePlan = createCodexRuntimePlanFixture();
+      params.runtimePlan = {
+        ...runtimePlan,
+        tools: {
+          normalize: (tools: Array<{ name: string }>) =>
+            trigger === "heartbeat"
+              ? tools.filter((tool) => tool.name === "heartbeat_respond")
+              : tools,
+          logDiagnostics: () => undefined,
+        },
+      } as NonNullable<EmbeddedRunAttemptParams["runtimePlan"]>;
       if (trigger) {
         params.trigger = trigger;
-        params.toolsAllow = ["heartbeat_respond"];
       }
       return params;
     };
@@ -1761,7 +1770,7 @@ describe("runCodexAppServerAttempt", () => {
       harness.requests
         .map((entry) => entry.method)
         .filter((method) => method === "thread/start" || method === "thread/resume"),
-    ).toEqual(["thread/start", "thread/start", "thread/resume"]);
+    ).toEqual(["thread/start", "thread/resume", "thread/resume"]);
   });
 
   it("disables Codex native tool surfaces when runtime toolsAllow is empty", async () => {

@@ -1068,7 +1068,7 @@ export function resolveAttemptToolPolicyMessageProvider(params: {
 
 function emitEmbeddedAttemptStageMark(params: {
   config?: EmbeddedRunAttemptParams["config"];
-  group: "prep" | "core-plugin-tools";
+  group: "prep" | "core-plugin-tools" | "system-prompt" | "session-resource-loader";
   stage: EmbeddedRunStageTiming;
   trigger: EmbeddedRunAttemptParams["trigger"];
   provider: string;
@@ -1316,6 +1316,30 @@ export async function runEmbeddedAttempt(
     }
     const message = formatEmbeddedRunStageSummary(
       `[trace:embedded-run] core-plugin-tool stages: runId=${params.runId} sessionId=${params.sessionId} phase=${phase}`,
+      summary,
+    );
+    if (shouldWarn) {
+      log.warn(message);
+    } else {
+      log.trace(message);
+    }
+  };
+  const emitPrepSubstageSummary = (
+    group: "system-prompt" | "session-resource-loader",
+    summary: ReturnType<typeof prepStages.snapshot>,
+  ) => {
+    if (summary.stages.length === 0) {
+      return;
+    }
+    const shouldWarn = shouldWarnEmbeddedRunStageSummary(summary, {
+      totalThresholdMs: 5_000,
+      stageThresholdMs: 2_000,
+    });
+    if (!shouldWarn && !log.isEnabled("trace")) {
+      return;
+    }
+    const message = formatEmbeddedRunStageSummary(
+      `[trace:embedded-run] ${group} stages: runId=${params.runId} sessionId=${params.sessionId}`,
       summary,
     );
     if (shouldWarn) {
@@ -2063,12 +2087,25 @@ export async function runEmbeddedAttempt(
     });
     const effectivePromptMode = minimalPromptForTools ? ("minimal" as const) : promptMode;
     const effectiveSkillsPrompt = minimalPromptForTools ? undefined : skillsPrompt;
+    const systemPromptStages = createEmbeddedRunStageTracker({
+      onMark: (stage) =>
+        emitEmbeddedAttemptStageMark({
+          config: params.config,
+          group: "system-prompt",
+          stage,
+          trigger: params.trigger,
+          provider: params.provider,
+          modelId: params.modelId,
+          messageChannel: params.messageChannel ?? params.messageProvider,
+        }),
+    });
     const openClawReferences = await resolveOpenClawReferencePaths({
       workspaceDir: effectiveWorkspace,
       argv1: process.argv[1],
       cwd: effectiveWorkspace,
       moduleUrl: import.meta.url,
     });
+    systemPromptStages.mark("reference-paths");
     const heartbeatPrompt = shouldInjectHeartbeatPrompt({
       config: params.config,
       agentId: sessionAgentId,
@@ -2102,6 +2139,7 @@ export async function runEmbeddedAttempt(
         workspaceDir: effectiveWorkspace,
         context: promptContributionContext,
       });
+    systemPromptStages.mark("prompt-contribution");
 
     const bootstrapTruncationNotice = buildBootstrapPromptWarningNotice(
       bootstrapPromptWarning.lines,
@@ -2167,6 +2205,7 @@ export async function runEmbeddedAttempt(
         },
       },
     });
+    systemPromptStages.mark("build-attempt-prompt");
     const appendPrompt = attemptSystemPrompt.systemPrompt;
     const systemPromptReport = buildSystemPromptReport({
       source: "run",
@@ -2196,10 +2235,25 @@ export async function runEmbeddedAttempt(
       skillsPrompt,
       tools: effectiveTools,
     });
+    systemPromptStages.mark("build-report");
     const systemPromptOverride = attemptSystemPrompt.systemPromptOverride;
     let systemPromptText = systemPromptOverride();
+    systemPromptStages.mark("override");
     prepStages.mark("system-prompt");
+    emitPrepSubstageSummary("system-prompt", systemPromptStages.snapshot());
 
+    const resourceLoaderStages = createEmbeddedRunStageTracker({
+      onMark: (stage) =>
+        emitEmbeddedAttemptStageMark({
+          config: params.config,
+          group: "session-resource-loader",
+          stage,
+          trigger: params.trigger,
+          provider: params.provider,
+          modelId: params.modelId,
+          messageChannel: params.messageChannel ?? params.messageProvider,
+        }),
+    });
     const sessionWriteLockOptions = resolveSessionWriteLockOptions(params.config, {
       maxHoldMsFallback: resolveSessionLockMaxHoldFromTimeout({
         timeoutMs: resolveRunTimeoutWithCompactionGraceMs({
@@ -2215,6 +2269,7 @@ export async function runEmbeddedAttempt(
         ...sessionWriteLockOptions,
       },
     });
+    resourceLoaderStages.mark("session-lock");
 
     let sessionManager: ReturnType<typeof guardSessionManager> | undefined;
     let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
@@ -2232,6 +2287,7 @@ export async function runEmbeddedAttempt(
         .stat(params.sessionFile)
         .then(() => true)
         .catch(() => false);
+      resourceLoaderStages.mark("session-file");
 
       const transcriptPolicy = resolveAttemptTranscriptPolicy({
         runtimePlan: params.runtimePlan,
@@ -2265,6 +2321,7 @@ export async function runEmbeddedAttempt(
         },
       });
       trackSessionManagerAccess(params.sessionFile);
+      resourceLoaderStages.mark("session-manager");
 
       await runAttemptContextEngineBootstrap({
         hadSessionFile,
@@ -2295,6 +2352,7 @@ export async function runEmbeddedAttempt(
           }),
         warn: (message) => log.warn(message),
       });
+      resourceLoaderStages.mark("context-engine");
 
       await prepareSessionManagerForRun({
         sessionManager,
@@ -2303,6 +2361,7 @@ export async function runEmbeddedAttempt(
         sessionId: params.sessionId,
         cwd: effectiveWorkspace,
       });
+      resourceLoaderStages.mark("session-prepare");
 
       const settingsManager = createPreparedEmbeddedPiSettingsManager({
         cwd: effectiveWorkspace,
@@ -2336,6 +2395,7 @@ export async function runEmbeddedAttempt(
         modelId: params.modelId,
         model: params.model,
       });
+      resourceLoaderStages.mark("settings-resource-init");
       const resourceLoader = createEmbeddedPiResourceLoader({
         cwd: resolvedWorkspace,
         agentDir,
@@ -2343,6 +2403,7 @@ export async function runEmbeddedAttempt(
         extensionFactories,
       });
       await resourceLoader.reload();
+      resourceLoaderStages.mark("resource-loader-reload");
       // DefaultResourceLoader.reload() rehydrates settings from disk and can drop OpenClaw
       // compaction overrides applied in createPreparedEmbeddedPiSettingsManager — same
       // rehydration also restores Pi's auto-compaction (openclaw#75799), so re-apply
@@ -2353,7 +2414,9 @@ export async function runEmbeddedAttempt(
         contextTokenBudget: params.contextTokenBudget,
       });
       applyPiAutoCompactionGuard(piAutoCompactionGuardArgs);
+      resourceLoaderStages.mark("compaction-guards");
       prepStages.mark("session-resource-loader");
+      emitPrepSubstageSummary("session-resource-loader", resourceLoaderStages.snapshot());
 
       // Get hook runner early so it's available when creating tools
       const hookRunner = getGlobalHookRunner();

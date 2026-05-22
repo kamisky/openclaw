@@ -14,6 +14,7 @@ Docs: https://docs.openclaw.ai
 - QA-Lab: add curated mock JSONL replay fixtures and first-drift reporting for runtime-parity audits. (#80323, refs #80176) Thanks @100yenadmin.
 - QA-Lab: include the optional 100-turn runtime parity soak in release-soak artifacts so long-run Codex/Pi transcript drift stays visible outside the default gate. (#80395) Thanks @100yenadmin.
 - QA-Lab: add a live-only long-context progress watchdog scenario for Codex app-server timeout and stalled-run sentinels. (#80323) Thanks @100yenadmin.
+- QA-Lab: tag gateway restart recovery and streaming final-integrity scenarios as live-only runtime parity lanes. (#80323) Thanks @100yenadmin.
 - QA-Lab: add a personal-agent failure recovery scenario that checks honest partial status, retry boundaries, and local recovery artifacts. (#83872) Thanks @iFiras-Max1.
 - QA-Lab: include an opt-in `update.run` package self-upgrade sentinel for destructive latest-package recovery checks.
 - QA-Lab: add Codex plugin lifecycle and auth-profile fixture coverage for missing installs, pinned-version drift, first-turn install ordering, and doctor migration safety. (#80323, refs #80174) Thanks @100yenadmin.
@@ -24,6 +25,8 @@ Docs: https://docs.openclaw.ai
 
 - Agents/subagents: surface blocked child-run completions as errors instead of successful subagent finishes. (#80886) Thanks @TurboTheTurtle.
 - WhatsApp: update Baileys to `7.0.0-rc13` and drop the obsolete logger type patch.
+- Install/update: reject OpenClaw GitHub source package targets early and point moving-main users at the dev/git install path instead of the broken npm source-install flow.
+- Gateway: mirror successful same-source message-tool sends into session transcripts so delivered replies stay in later history/context. (#84837) Thanks @iFiras-Max1.
 - Infra/json: retry transient `File changed during read` races while loading JSON state so config and state reads recover instead of failing the turn. (#84285)
 - Providers/Ollama: resolve configured Ollama Cloud `OLLAMA_API_KEY` markers to the real discovery key so cloud provider entries keep authenticated model catalog access. (#85037)
 - Discord: keep persistent component registry fallback warnings actionable by forwarding structured error and cause metadata through the runtime logger. Fixes #84185. (#84190) Thanks @100menotu001.

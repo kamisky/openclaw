@@ -13,7 +13,6 @@ const platform = normalizePlatform(String(payload.platform || "linux"));
 const provider = String(payload.provider || process.env.CRABBOX_PROVIDER || "aws");
 const requestedHeadSha = String(payload.head_sha || "");
 const ttlMinutes = Number(payload.ttl_minutes || DEFAULT_TTL_MINUTES[platform]);
-const commentId = String(payload.comment_id || "");
 const outputDir = path.join(".artifacts", "qa-e2e", "mantis", "pr-desktop-lease");
 const runUrl =
   process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
@@ -35,6 +34,14 @@ async function main() {
   }
 
   const pull = ghJson(["pr", "view", String(prNumber), "--repo", repo, "--json", "state,headRefOid,url"]);
+  if (String(pull.state || "").toUpperCase() !== "OPEN") {
+    postComment({
+      status: "failed",
+      failed_step: "PR state check",
+      failure_excerpt: `PR ${repo}#${prNumber} is ${pull.state || "unknown"}; desktop leases only run for open PRs.`,
+    });
+    return;
+  }
   const headSha = String(pull.headRefOid || "");
   if (requestedHeadSha && headSha && requestedHeadSha !== headSha) {
     postComment({
@@ -47,7 +54,7 @@ async function main() {
 
   if (action === "lease") return lease(headSha);
 
-  const active = findLatestLease();
+  const active = findLatestActiveLease();
   if (!active?.lease_id) {
     postComment({
       status: "failed",
@@ -57,7 +64,17 @@ async function main() {
     return;
   }
   if (action === "status") {
-    const status = runCrabbox(["inspect", "--provider", provider, active.lease_id], { allowFailure: true });
+    const status = inspectLease(active.lease_id);
+    if (status.status !== 0) {
+      postComment({
+        ...active,
+        status: "failed",
+        provider,
+        failed_step: "status",
+        failure_excerpt: formatProcessFailure(["crabbox", ...inspectArgs(active.lease_id)], status),
+      });
+      return;
+    }
     postComment({
       ...active,
       status: "already_active",
@@ -67,19 +84,42 @@ async function main() {
     return;
   }
   if (action === "stop") {
-    runCrabbox(["stop", "--provider", provider, active.lease_id], { allowFailure: true });
+    const stop = runCrabbox(["stop", "--provider", provider, active.lease_id], { allowFailure: true });
+    if (stop.status !== 0) {
+      postComment({
+        ...active,
+        status: "failed",
+        provider,
+        failed_step: "stop",
+        failure_excerpt: formatProcessFailure(["crabbox", "stop", "--provider", provider, active.lease_id], stop),
+      });
+      return;
+    }
     postComment({ ...active, status: "stopped", provider });
     return;
   }
-  runCrabbox(["webvnc", "reset", "--provider", provider, "--target", targetForPlatform(platform), "--id", active.lease_id], {
+  const reset = runCrabbox(["webvnc", "reset", "--provider", provider, "--target", targetForPlatform(platform), "--id", active.lease_id], {
     allowFailure: true,
   });
+  if (reset.status !== 0) {
+    postComment({
+      ...active,
+      status: "failed",
+      provider,
+      failed_step: "reset-vnc",
+      failure_excerpt: formatProcessFailure(
+        ["crabbox", "webvnc", "reset", "--provider", provider, "--target", targetForPlatform(platform), "--id", active.lease_id],
+        reset,
+      ),
+    });
+    return;
+  }
   postComment({ ...active, status: "reset", provider, webvnc_bridge: "reset requested" });
 }
 
 function lease(headSha) {
-  const existing = findLatestLease();
-  if (existing?.lease_id && existing.status !== "stopped") {
+  const existing = findLatestActiveLease();
+  if (existing?.lease_id) {
     postComment({ ...existing, status: "already_active", provider });
     return;
   }
@@ -283,16 +323,62 @@ function findLatestLease() {
       platform,
       provider: body.match(/- Provider: `([^`]+)`/)?.[1] || provider,
       webvnc_url: body.match(/WebVNC: (https:\/\/\S+)/)?.[1] || "",
+      expires_at: body.match(/- Expires: `([^`]+)`/)?.[1] || "",
       status: body.includes("Stopped the Mantis Crabbox") ? "stopped" : "ready",
     };
   }
   return null;
 }
 
+function findLatestActiveLease() {
+  const latest = findLatestLease();
+  if (!latest?.lease_id || latest.status === "stopped") return null;
+  if (isExpiredCommentLease(latest)) return null;
+  const inspect = inspectLease(latest.lease_id);
+  if (!isActiveInspection(inspect)) return null;
+  return {
+    ...latest,
+    status_excerpt: inspect.stdout || inspect.stderr,
+  };
+}
+
+function inspectLease(leaseID) {
+  return runCrabbox(inspectArgs(leaseID), { allowFailure: true });
+}
+
+function inspectArgs(leaseID) {
+  return ["inspect", "--provider", provider, "--target", targetForPlatform(platform), "--id", leaseID, "--json"];
+}
+
+function isExpiredCommentLease(lease) {
+  if (!lease.expires_at) return false;
+  const expiresAt = Date.parse(lease.expires_at);
+  return Number.isFinite(expiresAt) && expiresAt <= Date.now();
+}
+
+function isActiveInspection(result) {
+  if (result.status !== 0) return false;
+  const text = `${result.stdout}\n${result.stderr}`.trim();
+  if (!text) return true;
+  let searchable = text;
+  try {
+    searchable = JSON.stringify(JSON.parse(text));
+  } catch {
+    // Human-readable inspect output is still useful for broad terminal-state matching.
+  }
+  return !/\b(stopped|terminated|expired|deleted|not[-_ ]?found)\b/i.test(searchable);
+}
+
 function runCrabbox(args, options = {}) {
   const result = spawnSync("crabbox", args, { encoding: "utf8", maxBuffer: 20 * 1024 * 1024 });
   if (result.status !== 0 && !options.allowFailure) throw new Error(formatProcessFailure(["crabbox", ...args], result));
-  return { status: result.status ?? 1, stdout: result.stdout || "", stderr: result.stderr || "" };
+  return {
+    status: result.status ?? 1,
+    signal: result.signal ?? null,
+    error: result.error ?? null,
+    stdout: result.stdout || "",
+    stderr: result.stderr || "",
+  };
 }
 
 function formatProcessFailure(command, result) {

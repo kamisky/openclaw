@@ -53,6 +53,7 @@ Docs: https://docs.openclaw.ai
 - WhatsApp: extend QA trace phases through inbound processing and buffered reply dispatch so RTT artifacts isolate the remaining pre-send delay.
 - WhatsApp: keep raw session identifiers out of QA trace phase logs while preserving reply-path timing instrumentation.
 - WhatsApp: lazy-load outbound send helpers from the channel plugin so registration avoids loading runtime send/media code before the first outbound action.
+- Plugins: hash large SDK alias-map cache keys so plugin loader caches do not retain full alias-path JSON strings in memory.
 - Replies: skip provider thinking-catalog hydration when thinking is off so messaging replies avoid unnecessary model-runtime setup before dispatch.
 - Providers: reuse already-loaded provider runtime hooks for synthetic auth before falling back to provider discovery loads.
 - QA-Lab: include the gateway diagnostic timeline in WhatsApp live trace artifacts so RTT probes expose reply setup, compaction, and model-run phase costs.

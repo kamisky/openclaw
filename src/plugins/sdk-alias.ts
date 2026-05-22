@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -724,10 +725,24 @@ function hasJitiNormalizedAliasMarker(aliasMap: Record<string, string>) {
   return Boolean((aliasMap as Record<symbol, unknown>)[JITI_NORMALIZED_ALIAS_SYMBOL]);
 }
 
+function createAliasMapDigest(aliasMap: Record<string, string>): { count: number; digest: string } {
+  const entries = Object.entries(aliasMap).toSorted(([left], [right]) => left.localeCompare(right));
+  const hash = createHash("sha256");
+  for (const [key, value] of entries) {
+    hash.update(key);
+    hash.update("\0");
+    hash.update(value);
+    hash.update("\0");
+  }
+  return {
+    count: entries.length,
+    digest: hash.digest("base64url"),
+  };
+}
+
 function createJitiAliasContentCacheKey(aliasMap: Record<string, string>) {
-  return JSON.stringify(
-    Object.entries(aliasMap).toSorted(([left], [right]) => left.localeCompare(right)),
-  );
+  const aliasDigest = createAliasMapDigest(aliasMap);
+  return `aliases:${aliasDigest.count}:${aliasDigest.digest}`;
 }
 
 function normalizePluginLoaderAliasMapForJiti(
@@ -951,12 +966,10 @@ export function createPluginLoaderModuleCacheKey(params: {
   tryNative: boolean;
   aliasMap: Record<string, string>;
 }): string {
-  return JSON.stringify({
-    tryNative: params.tryNative,
-    aliasMap: Object.entries(params.aliasMap).toSorted(([left], [right]) =>
-      left.localeCompare(right),
-    ),
-  });
+  const aliasDigest = createAliasMapDigest(params.aliasMap);
+  return `tryNative:${params.tryNative ? "1" : "0"}:aliases:${aliasDigest.count}:${
+    aliasDigest.digest
+  }`;
 }
 
 export function resolvePluginLoaderModuleConfig(params: {

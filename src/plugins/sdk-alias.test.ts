@@ -1392,23 +1392,25 @@ describe("plugin sdk alias helpers", () => {
   });
 
   it("keeps plugin loader module cache keys stable across alias insertion order", () => {
-    expect(
-      createPluginLoaderModuleCacheKey({
-        tryNative: true,
-        aliasMap: {
-          zeta: "/repo/zeta.js",
-          alpha: "/repo/alpha.js",
-        },
-      }),
-    ).toBe(
-      createPluginLoaderModuleCacheKey({
-        tryNative: true,
-        aliasMap: {
-          alpha: "/repo/alpha.js",
-          zeta: "/repo/zeta.js",
-        },
-      }),
-    );
+    const first = createPluginLoaderModuleCacheKey({
+      tryNative: true,
+      aliasMap: {
+        zeta: "/repo/zeta.js",
+        alpha: "/repo/alpha.js",
+      },
+    });
+    const second = createPluginLoaderModuleCacheKey({
+      tryNative: true,
+      aliasMap: {
+        alpha: "/repo/alpha.js",
+        zeta: "/repo/zeta.js",
+      },
+    });
+
+    expect(second).toBe(first);
+    expect(first).not.toContain("/repo/alpha.js");
+    expect(first.length).toBeLessThan(100);
+    expect(createPluginLoaderModuleCacheKey({ tryNative: false, aliasMap: {} })).not.toBe(first);
   });
 
   it("returns plugin loader module config with stable cache keys", () => {

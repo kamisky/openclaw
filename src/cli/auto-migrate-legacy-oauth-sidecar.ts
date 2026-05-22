@@ -85,18 +85,25 @@ export async function maybeAutoMigrateLegacyOAuthSidecarOnInteractiveCli(params:
     return;
   }
 
-  const [{ readBestEffortConfig }, { maybeRepairLegacyOAuthSidecarProfiles }, clack] =
-    await Promise.all([
-      import("../config/io.js"),
-      import("../commands/doctor-auth-oauth-sidecar.js"),
-      import("@clack/prompts"),
-    ]);
+  const [
+    { readBestEffortConfig },
+    { hasMigratableLegacyOAuthSidecarStores, maybeRepairLegacyOAuthSidecarProfiles },
+    clack,
+  ] = await Promise.all([
+    import("../config/io.js"),
+    import("../commands/doctor-auth-oauth-sidecar.js"),
+    import("@clack/prompts"),
+  ]);
   const prompter = params.prompter ?? { confirm: (p) => clack.confirm(p) };
 
   let declined = false;
   try {
+    const cfg = await readBestEffortConfig();
+    if (!hasMigratableLegacyOAuthSidecarStores({ cfg, env })) {
+      return;
+    }
     const result = await maybeRepairLegacyOAuthSidecarProfiles({
-      cfg: await readBestEffortConfig(),
+      cfg,
       env,
       prompter: {
         confirmAutoFix: async (p) => {

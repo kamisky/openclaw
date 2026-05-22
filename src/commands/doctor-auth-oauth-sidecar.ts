@@ -189,6 +189,19 @@ function backupLegacyOAuthSidecarStore(authPath: string, now: () => number): str
   return backupPath;
 }
 
+export function hasMigratableLegacyOAuthSidecarStores(params: {
+  cfg: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
+}): boolean {
+  const env = params.env ?? process.env;
+  for (const candidate of listAuthProfileRepairCandidates(params.cfg, env)) {
+    if (resolveLegacyOAuthSidecarStore(candidate) !== null) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export async function maybeRepairLegacyOAuthSidecarProfiles(params: {
   cfg: OpenClawConfig;
   prompter: Pick<DoctorPrompter, "confirmAutoFix">;

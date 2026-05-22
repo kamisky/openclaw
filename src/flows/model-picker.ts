@@ -6,7 +6,7 @@ import {
   isModelPickerVisibleModelRef,
   isModelPickerVisibleProvider,
 } from "../agents/model-picker-visibility.js";
-import { createProviderAuthChecker } from "../agents/model-provider-auth.js";
+import { resolveProviderAuthMap } from "../agents/model-provider-auth.js";
 import { formatLiteralProviderPrefixedModelRef } from "../agents/model-ref-shared.js";
 import {
   buildConfiguredModelCatalog,
@@ -725,7 +725,7 @@ export async function promptDefaultModel(
   });
   const models = ignoreAllowlist
     ? catalog
-    : resolveVisibleModelCatalog({
+    : await resolveVisibleModelCatalog({
         cfg,
         catalog,
         defaultProvider: DEFAULT_PROVIDER,
@@ -767,7 +767,8 @@ export async function promptDefaultModel(
   const hasPreferredProvider = preferredProvider
     ? filteredModels.some((entry) => matchesPreferredProvider?.(entry.provider))
     : false;
-  const hasAuth = createProviderAuthChecker({
+  const hasAuth = await resolveProviderAuthMap({
+    providers: filteredModels.map((entry) => entry.provider),
     cfg,
     workspaceDir: params.workspaceDir,
     env: params.env,
@@ -932,11 +933,6 @@ export async function promptModelAllowlist(params: {
     fallbackKeys.length > 0 ||
     (params.initialSelections?.length ?? 0) > 0 ||
     configuredRaw.length > 0;
-  const hasAuth = createProviderAuthChecker({
-    cfg,
-    workspaceDir: params.workspaceDir,
-    env: params.env,
-  });
   const matchesPreferredProvider = preferredProvider
     ? createPreferredProviderMatcher({
         preferredProvider,
@@ -960,6 +956,14 @@ export async function promptModelAllowlist(params: {
     const initialKeys = normalizeModelKeys(initialSeeds.filter((key) => scopeKeySet.has(key)));
     const options: WizardSelectOption[] = [];
     const seen = new Set<string>();
+    const hasAuth = await resolveProviderAuthMap({
+      providers: scopeKeys
+        .map((key) => splitModelKey(key)?.provider)
+        .filter((provider): provider is string => Boolean(provider)),
+      cfg,
+      workspaceDir: params.workspaceDir,
+      env: params.env,
+    });
     for (const key of scopeKeys) {
       addModelKeySelectOption({
         key,
@@ -1052,6 +1056,12 @@ export async function promptModelAllowlist(params: {
     preferredProvider && allowedCatalog.some((entry) => matchesPreferredProvider?.(entry.provider))
       ? allowedCatalog.filter((entry) => matchesPreferredProvider?.(entry.provider))
       : allowedCatalog;
+  const hasAuth = await resolveProviderAuthMap({
+    providers: filteredCatalog.map((entry) => entry.provider),
+    cfg,
+    workspaceDir: params.workspaceDir,
+    env: params.env,
+  });
 
   const scopeKeys = allowedKeySet
     ? allowedKeys

@@ -76,7 +76,7 @@ function resolveProviderAuthConfigFingerprint(cfg: OpenClawConfig | undefined): 
   return fingerprint;
 }
 
-export function hasAuthForModelProvider(params: {
+export async function hasAuthForModelProvider(params: {
   provider: string;
   cfg?: OpenClawConfig;
   workspaceDir?: string;
@@ -85,7 +85,7 @@ export function hasAuthForModelProvider(params: {
   store?: AuthProfileStore;
   allowPluginSyntheticAuth?: boolean;
   discoverExternalCliAuth?: boolean;
-}): boolean {
+}): Promise<boolean> {
   const provider = normalizeProviderId(params.provider);
   // The prepared map is built by warmCurrentProviderAuthState — one entry per
   // configured agent, keyed by agentId. Only consult it when the caller's
@@ -123,6 +123,12 @@ export function hasAuthForModelProvider(params: {
       return preparedAnswer;
     }
   }
+  // Slow path follows: sync fs reads + external-CLI discovery probes. Yield
+  // here so a sweep over N providers (e.g. resolveVisibleModelCatalog.filter)
+  // doesn't pin the event loop for ~N * 500 ms. Per-call overhead is one
+  // setImmediate tick; per-sweep gain is responsiveness to Discord acks and
+  // other event-loop work.
+  await new Promise<void>((resolve) => setImmediate(resolve));
   if (
     hasRuntimeAvailableProviderAuth({
       provider,
@@ -151,6 +157,35 @@ export function hasAuthForModelProvider(params: {
   return false;
 }
 
+// Resolve auth for a known set of providers up front, returning a sync
+// closure. Use this when a caller needs to pass a sync `(provider) => boolean`
+// into existing helpers (e.g. the wizard's option builders) but still wants
+// the per-provider lookup to yield the event loop. The unique provider set is
+// resolved sequentially through the async checker; the returned closure is
+// pure Map lookup. Unknown providers return false.
+export async function resolveProviderAuthMap(params: {
+  providers: Iterable<string>;
+  cfg?: OpenClawConfig;
+  workspaceDir?: string;
+  agentId?: string;
+  env?: NodeJS.ProcessEnv;
+  allowPluginSyntheticAuth?: boolean;
+  discoverExternalCliAuth?: boolean;
+}): Promise<(provider: string) => boolean> {
+  const checker = createProviderAuthChecker(params);
+  const answers = new Map<string, boolean>();
+  const seen = new Set<string>();
+  for (const raw of params.providers) {
+    const key = normalizeProviderId(raw);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    answers.set(key, await checker(key));
+  }
+  return (provider: string) => answers.get(normalizeProviderId(provider)) ?? false;
+}
+
 export function createProviderAuthChecker(params: {
   cfg?: OpenClawConfig;
   workspaceDir?: string;
@@ -158,15 +193,15 @@ export function createProviderAuthChecker(params: {
   env?: NodeJS.ProcessEnv;
   allowPluginSyntheticAuth?: boolean;
   discoverExternalCliAuth?: boolean;
-}): (provider: string) => boolean {
+}): (provider: string) => Promise<boolean> {
   const authCache = new Map<string, boolean>();
-  return (provider: string) => {
+  return async (provider: string) => {
     const key = normalizeProviderId(provider);
     const cached = authCache.get(key);
     if (cached !== undefined) {
       return cached;
     }
-    const value = hasAuthForModelProvider({
+    const value = await hasAuthForModelProvider({
       provider: key,
       cfg: params.cfg,
       workspaceDir: params.workspaceDir,
@@ -210,7 +245,7 @@ export async function warmCurrentProviderAuthState(cfg: OpenClawConfig): Promise
     });
     const state = new Map<string, boolean>();
     for (const provider of providers) {
-      const value = hasAuthForModelProvider({
+      const value = await hasAuthForModelProvider({
         provider,
         cfg,
         workspaceDir,

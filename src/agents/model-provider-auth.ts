@@ -12,6 +12,7 @@ import {
   ensureAuthProfileStore,
   ensureAuthProfileStoreWithoutExternalProfiles,
   listProfilesForProvider,
+  registerAuthProfileFailureListener,
   type AuthProfileStore,
 } from "./auth-profiles.js";
 import { hasRuntimeAvailableProviderAuth } from "./model-auth.js";
@@ -43,6 +44,16 @@ let currentProviderAuthStateGeneration = 0;
 export function clearCurrentProviderAuthState(): void {
   currentProviderAuthStates = null;
   currentProviderAuthStateGeneration += 1;
+}
+
+// Wire the prepared auth map to self-invalidate when an auth-profile failure
+// is observed at request time (token rotated, login revoked, etc.). The next
+// model-listing call recomputes against the real auth state and a fresh warm
+// repopulates the map. Returns the unregister function for tests.
+export function wirePreparedAuthInvalidationToAuthFailures(): () => void {
+  return registerAuthProfileFailureListener(() => {
+    clearCurrentProviderAuthState();
+  });
 }
 
 function resolvePreparedStateForCaller(params: {

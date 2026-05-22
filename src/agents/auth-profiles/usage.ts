@@ -26,6 +26,41 @@ const authProfileUsageDeps = {
   updateAuthProfileStoreWithLock,
 };
 
+export type AuthProfileFailureEvent = {
+  provider: string;
+  profileId: string;
+  reason: AuthProfileFailureReason;
+  cfg?: OpenClawConfig;
+  agentDir?: string;
+};
+
+type AuthProfileFailureListener = (event: AuthProfileFailureEvent) => void;
+
+const authProfileFailureListeners = new Set<AuthProfileFailureListener>();
+
+export function registerAuthProfileFailureListener(
+  listener: AuthProfileFailureListener,
+): () => void {
+  authProfileFailureListeners.add(listener);
+  return () => {
+    authProfileFailureListeners.delete(listener);
+  };
+}
+
+export function clearAuthProfileFailureListeners(): void {
+  authProfileFailureListeners.clear();
+}
+
+function fireAuthProfileFailureListeners(event: AuthProfileFailureEvent): void {
+  for (const listener of authProfileFailureListeners) {
+    try {
+      listener(event);
+    } catch {
+      // Listeners must not break failure recording.
+    }
+  }
+}
+
 export const testing = {
   setDepsForTest(
     overrides: Partial<{
@@ -717,6 +752,13 @@ export async function markAuthProfileFailure(params: {
         now: updateTime,
       });
     }
+    fireAuthProfileFailureListeners({
+      provider: profile.provider,
+      profileId,
+      reason,
+      cfg,
+      agentDir,
+    });
     return;
   }
   if (!store.profiles[profileId]) {
@@ -757,6 +799,13 @@ export async function markAuthProfileFailure(params: {
     previous: previousStats,
     next: nextStats,
     now,
+  });
+  fireAuthProfileFailureListeners({
+    provider: store.profiles[profileId]?.provider ?? profile.provider,
+    profileId,
+    reason,
+    cfg,
+    agentDir,
   });
 }
 

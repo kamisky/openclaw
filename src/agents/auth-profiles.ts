@@ -78,12 +78,15 @@ export type {
 export {
   calculateAuthProfileCooldownMs,
   clearAuthProfileCooldown,
+  clearAuthProfileFailureListeners,
   clearExpiredCooldowns,
   getSoonestCooldownExpiry,
   isProfileInCooldown,
   markAuthProfileCooldown,
   markAuthProfileBlockedUntil,
   markAuthProfileFailure,
+  registerAuthProfileFailureListener,
   resolveProfilesUnavailableReason,
   resolveProfileUnusableUntilForDisplay,
 } from "./auth-profiles/usage.js";
+export type { AuthProfileFailureEvent } from "./auth-profiles/usage.js";

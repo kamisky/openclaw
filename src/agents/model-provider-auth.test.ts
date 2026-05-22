@@ -11,13 +11,28 @@ const modelAuthMocks = vi.hoisted(() => ({
     vi.fn<(params: { provider: string; cfg?: OpenClawConfig; workspaceDir?: string }) => boolean>(),
 }));
 
-const authProfilesMocks = vi.hoisted(() => ({
-  ensureAuthProfileStore: vi.fn(() => ({ profiles: {} })),
-  ensureAuthProfileStoreWithoutExternalProfiles: vi.fn(() => ({ profiles: {} })),
-  externalCliDiscoveryForProviders: vi.fn(() => ({}) as never),
-  externalCliDiscoveryForProviderAuth: vi.fn(() => ({}) as never),
-  listProfilesForProvider: vi.fn(() => []),
-}));
+const authProfilesMocks = vi.hoisted(() => {
+  const failureListeners: Array<(event: unknown) => void> = [];
+  return {
+    ensureAuthProfileStore: vi.fn(() => ({ profiles: {} })),
+    ensureAuthProfileStoreWithoutExternalProfiles: vi.fn(() => ({ profiles: {} })),
+    externalCliDiscoveryForProviders: vi.fn(() => ({}) as never),
+    externalCliDiscoveryForProviderAuth: vi.fn(() => ({}) as never),
+    listProfilesForProvider: vi.fn(() => []),
+    registerAuthProfileFailureListener: vi.fn((listener: (event: unknown) => void) => {
+      failureListeners.push(listener);
+      return () => {
+        const i = failureListeners.indexOf(listener);
+        if (i >= 0) failureListeners.splice(i, 1);
+      };
+    }),
+    fireAuthProfileFailureForTest(event: unknown = {}) {
+      for (const listener of failureListeners) {
+        listener(event);
+      }
+    },
+  };
+});
 
 vi.mock("./model-catalog.js", () => ({
   loadModelCatalog: modelCatalogMocks.loadModelCatalog,
@@ -34,6 +49,7 @@ vi.mock("./auth-profiles.js", () => ({
   externalCliDiscoveryForProviders: authProfilesMocks.externalCliDiscoveryForProviders,
   externalCliDiscoveryForProviderAuth: authProfilesMocks.externalCliDiscoveryForProviderAuth,
   listProfilesForProvider: authProfilesMocks.listProfilesForProvider,
+  registerAuthProfileFailureListener: authProfilesMocks.registerAuthProfileFailureListener,
 }));
 
 vi.mock("./workspace.js", () => ({
@@ -47,8 +63,12 @@ vi.mock("./agent-scope-config.js", () => ({
   resolveDefaultAgentId: () => "default",
 }));
 
-const { clearCurrentProviderAuthState, hasAuthForModelProvider, warmCurrentProviderAuthState } =
-  await import("./model-provider-auth.js");
+const {
+  clearCurrentProviderAuthState,
+  hasAuthForModelProvider,
+  warmCurrentProviderAuthState,
+  wirePreparedAuthInvalidationToAuthFailures,
+} = await import("./model-provider-auth.js");
 
 describe("prepared provider auth state", () => {
   afterEach(() => {
@@ -161,6 +181,35 @@ describe("prepared provider auth state", () => {
       }),
     ).resolves.toBe(true);
     expect(modelAuthMocks.hasRuntimeAvailableProviderAuth).toHaveBeenCalledTimes(2);
+  });
+
+  it("wirePreparedAuthInvalidationToAuthFailures clears the prepared map when an auth-profile failure fires", async () => {
+    const cfg = {} as OpenClawConfig;
+    modelCatalogMocks.loadModelCatalog.mockResolvedValue([
+      { id: "gpt", name: "gpt", provider: "openai" },
+    ]);
+    modelAuthMocks.hasRuntimeAvailableProviderAuth.mockReturnValue(true);
+    const unregister = wirePreparedAuthInvalidationToAuthFailures();
+    await warmCurrentProviderAuthState(cfg);
+    expect(modelAuthMocks.hasRuntimeAvailableProviderAuth).toHaveBeenCalledTimes(1);
+
+    // Cached read — does not call compute again.
+    await expect(hasAuthForModelProvider({ provider: "openai", cfg })).resolves.toBe(true);
+    expect(modelAuthMocks.hasRuntimeAvailableProviderAuth).toHaveBeenCalledTimes(1);
+
+    // Simulate an auth-profile failure (e.g., token rotated, login revoked).
+    // The listener should clear the prepared map, forcing the next read to
+    // recompute against the real auth state.
+    modelAuthMocks.hasRuntimeAvailableProviderAuth.mockReturnValue(false);
+    authProfilesMocks.fireAuthProfileFailureForTest({
+      provider: "openai",
+      profileId: "openai-default",
+      reason: "permanent-auth",
+    });
+    await expect(hasAuthForModelProvider({ provider: "openai", cfg })).resolves.toBe(false);
+    expect(modelAuthMocks.hasRuntimeAvailableProviderAuth).toHaveBeenCalledTimes(2);
+
+    unregister();
   });
 
   it("does not publish an older warm after the prepared auth state is cleared", async () => {

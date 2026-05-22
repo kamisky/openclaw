@@ -1023,7 +1023,9 @@ export async function startGatewayPostAttachRuntime(
       if (params.minimalTestGateway) {
         return;
       }
-      const { warmCurrentProviderAuthState } = await import("../agents/model-provider-auth.js");
+      const { warmCurrentProviderAuthState, wirePreparedAuthInvalidationToAuthFailures } =
+        await import("../agents/model-provider-auth.js");
+      wirePreparedAuthInvalidationToAuthFailures();
       const startMs = Date.now();
       await warmCurrentProviderAuthState(params.cfgAtStart);
       params.log.info(`provider auth state pre-warmed in ${Date.now() - startMs}ms`);

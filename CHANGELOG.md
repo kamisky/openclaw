@@ -24,6 +24,7 @@ Docs: https://docs.openclaw.ai
 ### Fixes
 
 - Agents/subagents: surface blocked child-run completions as errors instead of successful subagent finishes. (#80886) Thanks @TurboTheTurtle.
+- Auth/Codex: auto-migrate legacy Codex OAuth profiles whose seed lives only in macOS Keychain on the first interactive `openclaw` invocation, with a one-time decline cool-off, so affected users no longer have to know about `openclaw doctor --fix` to self-heal; headless paths emit a one-shot warning naming the doctor command instead of silently failing with "No API key found". Fixes #85083. Thanks @romneyda.
 - Agents/Pi: treat accepted embedded `sessions_spawn` child-session handoffs as terminal progress so parent turns no longer report false non-deliverable failures. (#85054) Thanks @samzong.
 - WhatsApp: update Baileys to `7.0.0-rc13` and drop the obsolete logger type patch.
 - Install/update: reject OpenClaw GitHub source package targets early and point moving-main users at the dev/git install path instead of the broken npm source-install flow.
